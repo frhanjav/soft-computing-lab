@@ -1,3 +1,5 @@
+# has Death Penalty vs. Soft Penalty 
+
 import random
 import numpy as np
 import matplotlib.pyplot as plt
@@ -43,16 +45,54 @@ class KnapsackGA:
     def calculate_fitness(self, individual: List[int]) -> float:
         """
         Calculate fitness of an individual
-        Returns 0 if weight exceeds capacity, otherwise returns total value
+        Uses penalty method instead of death penalty for smoother evolution
         """
         total_weight = sum(individual[i] * self.items[i][0] for i in range(self.num_items))
         total_value = sum(individual[i] * self.items[i][1] for i in range(self.num_items))
         
-        # Penalty for exceeding capacity
+        # Penalty for exceeding capacity (softer penalty)
         if total_weight > self.capacity:
-            return 0
+            # Return penalized fitness instead of 0
+            penalty = (total_weight - self.capacity) * 10  # Penalty factor
+            return max(0, total_value - penalty)
         
         return total_value
+    
+    def repair_solution(self, individual: List[int]) -> List[int]:
+        """
+        Repair infeasible solutions by removing items with lowest value density
+        """
+        if not individual or sum(individual) == 0:
+            return individual
+        
+        # Calculate current weight
+        total_weight = sum(individual[i] * self.items[i][0] for i in range(self.num_items))
+        
+        if total_weight <= self.capacity:
+            return individual  # Already feasible
+        
+        # Create list of selected items with their indices and value density
+        selected_items = []
+        for i in range(self.num_items):
+            if individual[i] == 1:
+                weight, value = self.items[i]
+                density = value / weight if weight > 0 else 0
+                selected_items.append((i, weight, value, density))
+        
+        # Sort by value density (ascending) to remove least efficient items first
+        selected_items.sort(key=lambda x: x[3])
+        
+        # Remove items until feasible
+        repaired = individual[:]
+        current_weight = total_weight
+        
+        for item_idx, weight, value, density in selected_items:
+            if current_weight <= self.capacity:
+                break
+            repaired[item_idx] = 0
+            current_weight -= weight
+        
+        return repaired
     
     def tournament_selection(self, population: List[List[int]], tournament_size: int = 3) -> List[int]:
         """Select parent using tournament selection"""
@@ -61,7 +101,7 @@ class KnapsackGA:
     
     def crossover(self, parent1: List[int], parent2: List[int]) -> Tuple[List[int], List[int]]:
         """Single-point crossover between two parents"""
-        if random.random() > self.crossover_rate:
+        if random.random() > self.crossover_rate or self.num_items <= 1:
             return parent1[:], parent2[:]
         
         crossover_point = random.randint(1, self.num_items - 1)
@@ -114,8 +154,16 @@ class KnapsackGA:
                 
                 child1, child2 = self.crossover(parent1, parent2)
                 
+                # Repair infeasible solutions
+                child1 = self.repair_solution(child1)
+                child2 = self.repair_solution(child2)
+                
                 child1 = self.mutate(child1)
                 child2 = self.mutate(child2)
+                
+                # Repair again after mutation
+                child1 = self.repair_solution(child1)
+                child2 = self.repair_solution(child2)
                 
                 new_population.extend([child1, child2])
             
@@ -126,12 +174,13 @@ class KnapsackGA:
             if generation % 20 == 0 or generation == self.generations - 1:
                 print(f"Generation {generation}: Best Fitness = {best_gen_fitness}, Avg Fitness = {avg_gen_fitness:.2f}")
         
+        # Return solution details
         return self.get_solution_details()
     
     def get_solution_details(self) -> Dict:
         """Get detailed information about the best solution"""
         if self.best_solution is None:
-            return {}
+            return {'total_value': 0, 'total_weight': 0, 'selected_items': [], 'capacity_used': 0, 'num_items_selected': 0}
         
         selected_items = []
         total_weight = 0
@@ -196,8 +245,208 @@ def dynamic_programming_solution(items: List[Tuple[int, int]], capacity: int) ->
     
     return dp[n][capacity]
 
+def run_test_cases():
+    """Run essential test cases to validate the algorithm"""
+    print("="*60)
+    print("RUNNING TEST CASES")
+    print("="*60)
+    
+    test_cases = [
+        {
+            "name": "Basic Test",
+            "items": [(2, 3), (3, 4), (4, 5), (5, 6)],
+            "capacity": 5,
+            "description": "Simple 4-item problem"
+        },
+        {
+            "name": "Classical Example", 
+            "items": [(10, 60), (20, 100), (30, 120)],
+            "capacity": 50,
+            "description": "Standard textbook problem"
+        },
+        {
+            "name": "Edge Case - Single Item",
+            "items": [(5, 100)],
+            "capacity": 10,
+            "description": "Only one item that fits"
+        }
+    ]
+    
+    for i, test in enumerate(test_cases, 1):
+        print(f"\nTest {i}: {test['name']}")
+        print(f"Items: {test['items']}, Capacity: {test['capacity']}")
+        
+        # Get optimal solution
+        optimal_value = dynamic_programming_solution(test['items'], test['capacity'])
+        
+        # Test with GA
+        ga = KnapsackGA(items=test['items'], capacity=test['capacity'], 
+                       population_size=50, generations=50)
+        solution = ga.evolve()
+        ga_value = solution.get('total_value', 0)
+        quality = (ga_value / optimal_value * 100) if optimal_value > 0 else 100
+        
+        print(f"Optimal: {optimal_value}, GA: {ga_value}, Quality: {quality:.1f}%")
+        print(f"Result: {'PASS' if quality >= 80 else 'FAIL'}")
+    
+    return True
+
+def performance_benchmark():
+    """Benchmark the algorithm on different problem sizes"""
+    print("\n" + "="*60)
+    print("PERFORMANCE BENCHMARK")
+    print("="*60)
+    
+    problem_sizes = [10, 20, 50, 100]
+    
+    for size in problem_sizes:
+        print(f"\nProblem Size: {size} items")
+        
+        # Generate random problem
+        random.seed(42)  # For reproducible results
+        items = [(random.randint(1, 50), random.randint(10, 100)) for _ in range(size)]
+        capacity = sum(item[0] for item in items) // 3  # About 1/3 of total weight
+        
+        # Time the GA
+        import time
+        start_time = time.time()
+        
+        ga = KnapsackGA(
+            items=items,
+            capacity=capacity,
+            population_size=min(100, size * 2),
+            generations=min(200, size * 4),
+            mutation_rate=0.02,
+            crossover_rate=0.8
+        )
+        
+        solution = ga.evolve()
+        end_time = time.time()
+        
+        # Get optimal for smaller problems
+        if size <= 20:
+            optimal_value = dynamic_programming_solution(items, capacity)
+            quality = solution['total_value'] / optimal_value * 100
+            print(f"Optimal Value: {optimal_value}")
+            print(f"GA Quality: {quality:.1f}%")
+        
+        print(f"GA Value: {solution['total_value']}")
+        print(f"Execution Time: {end_time - start_time:.2f} seconds")
+        print(f"Items Selected: {solution['num_items_selected']}/{size}")
+        print(f"Capacity Used: {solution['capacity_used']:.1f}%")
+
+def validate_solution_feasibility():
+    """Test that all solutions are feasible"""
+    print("\n" + "="*60)
+    print("SOLUTION FEASIBILITY VALIDATION")
+    print("="*60)
+    
+    # Test multiple runs to check consistency
+    items = [(10, 60), (20, 100), (30, 120), (5, 30), (15, 75)]
+    capacity = 50
+    
+    feasible_count = 0
+    total_runs = 10
+    
+    for run in range(total_runs):
+        ga = KnapsackGA(items=items, capacity=capacity, population_size=50, generations=100)
+        solution = ga.evolve()
+        
+        # Check feasibility
+        total_weight = sum(solution['solution'][i] * items[i][0] for i in range(len(items)))
+        is_feasible = total_weight <= capacity
+        
+        if is_feasible:
+            feasible_count += 1
+        
+        print(f"Run {run+1}: Weight={total_weight}/{capacity}, Value={solution['total_value']}, Feasible={is_feasible}")
+    
+    print(f"\nFeasibility Rate: {feasible_count}/{total_runs} ({feasible_count/total_runs*100:.1f}%)")
+    return feasible_count == total_runs
+
 # Example usage and testing
+def compare_fitness_approaches():
+    """Compare death penalty vs. repair method approaches"""
+    print("\n" + "="*60)
+    print("COMPARING FITNESS APPROACHES")
+    print("="*60)
+    
+    items = [(10, 60), (20, 100), (30, 120), (5, 30), (15, 75)]
+    capacity = 50
+    
+    # Death penalty approach (original)
+    class DeathPenaltyGA(KnapsackGA):
+        def calculate_fitness(self, individual):
+            total_weight = sum(individual[i] * self.items[i][0] for i in range(self.num_items))
+            total_value = sum(individual[i] * self.items[i][1] for i in range(self.num_items))
+            return total_value if total_weight <= self.capacity else 0
+        
+        def repair_solution(self, individual):
+            return individual  # No repair
+    
+    print("1. Death Penalty Approach (Original):")
+    ga_death = DeathPenaltyGA(items=items, capacity=capacity, population_size=100, generations=150)
+    solution_death = ga_death.evolve()
+    
+    print("2. Repair Method Approach (Improved):")
+    ga_repair = KnapsackGA(items=items, capacity=capacity, population_size=100, generations=150)
+    solution_repair = ga_repair.evolve()
+    
+    # Plot comparison
+    plt.figure(figsize=(15, 5))
+    
+    plt.subplot(1, 3, 1)
+    plt.plot(ga_death.best_fitness_history, 'r-', label='Death Penalty - Best', linewidth=2)
+    plt.plot(ga_death.avg_fitness_history, 'r--', label='Death Penalty - Avg', alpha=0.7)
+    plt.xlabel('Generation')
+    plt.ylabel('Fitness')
+    plt.title('Death Penalty Approach')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.subplot(1, 3, 2)
+    plt.plot(ga_repair.best_fitness_history, 'b-', label='Repair Method - Best', linewidth=2)
+    plt.plot(ga_repair.avg_fitness_history, 'b--', label='Repair Method - Avg', alpha=0.7)
+    plt.xlabel('Generation')
+    plt.ylabel('Fitness')
+    plt.title('Repair Method Approach')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.subplot(1, 3, 3)
+    plt.plot(ga_death.avg_fitness_history, 'r--', label='Death Penalty - Avg', alpha=0.7)
+    plt.plot(ga_repair.avg_fitness_history, 'b--', label='Repair Method - Avg', alpha=0.7)
+    plt.xlabel('Generation')
+    plt.ylabel('Average Fitness')
+    plt.title('Average Fitness Comparison')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    print(f"\nResults Comparison:")
+    print(f"Death Penalty - Final Value: {solution_death['total_value']}")
+    print(f"Repair Method - Final Value: {solution_repair['total_value']}")
+    
+    # Calculate average fitness variance
+    death_variance = np.var(ga_death.avg_fitness_history)
+    repair_variance = np.var(ga_repair.avg_fitness_history)
+    
+    print(f"Death Penalty - Avg Fitness Variance: {death_variance:.2f}")
+    print(f"Repair Method - Avg Fitness Variance: {repair_variance:.2f}")
+    print(f"Smoothness Improvement: {((death_variance - repair_variance) / death_variance * 100):.1f}%")
+
 if __name__ == "__main__":
+    # Run basic tests
+    print("Running basic validation tests...")
+    run_test_cases()
+    
+    # Main example problem
+    print("\n" + "="*60)
+    print("MAIN EXAMPLE PROBLEM")
+    print("="*60)
+    
     # Example problem: Classical knapsack items (weight, value)
     items = [
         (10, 60),   # Item 1
