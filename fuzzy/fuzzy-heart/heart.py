@@ -157,6 +157,14 @@ class HeartDiseaseFIS:
                 {"age": {"set": "middle"}, "trestbps": {"set": "high"}, "ldl": {"set": "high"}},
                 {"risk": "high"}
             ),
+            FuzzyRule(
+                {"age": {"set": "old"}, "chol": {"set": "high"}},
+                {"risk": "high"}
+            ),
+            FuzzyRule(
+                {"ldl": {"set": "high"}, "hdl": {"set": "low"}},
+                {"risk": "high"}
+            ),
         ])
         
         # Moderate risk rules
@@ -181,6 +189,26 @@ class HeartDiseaseFIS:
                 {"age": {"set": "young"}, "trestbps": {"set": "high"}, "chol": {"set": "high"}},
                 {"risk": "moderate"}
             ),
+            FuzzyRule(
+                {"age": {"set": "middle"}, "chol": {"set": "normal"}},
+                {"risk": "moderate"}
+            ),
+            FuzzyRule(
+                {"age": {"set": "middle"}, "trestbps": {"set": "normal"}},
+                {"risk": "moderate"}
+            ),
+            FuzzyRule(
+                {"trestbps": {"set": "normal"}, "chol": {"set": "normal"}},
+                {"risk": "moderate"}
+            ),
+            FuzzyRule(
+                {"ldl": {"set": "normal"}, "hdl": {"set": "low"}},
+                {"risk": "moderate"}
+            ),
+            FuzzyRule(
+                {"age": {"set": "middle"}, "ldl": {"set": "normal"}},
+                {"risk": "moderate"}
+            ),
         ])
         
         # Low risk rules
@@ -199,6 +227,22 @@ class HeartDiseaseFIS:
             ),
             FuzzyRule(
                 {"age": {"set": "middle"}, "trestbps": {"set": "low"}, "chol": {"set": "low"}},
+                {"risk": "low"}
+            ),
+            FuzzyRule(
+                {"age": {"set": "young"}, "chol": {"set": "low"}},
+                {"risk": "low"}
+            ),
+            FuzzyRule(
+                {"age": {"set": "young"}, "trestbps": {"set": "low"}},
+                {"risk": "low"}
+            ),
+            FuzzyRule(
+                {"ldl": {"set": "low"}, "hdl": {"set": "normal"}},
+                {"risk": "low"}
+            ),
+            FuzzyRule(
+                {"hdl": {"set": "high"}},
                 {"risk": "low"}
             ),
         ])
@@ -220,14 +264,26 @@ class HeartDiseaseFIS:
             if var_name in self.variables:
                 fuzzified[var_name] = self.variables[var_name].fuzzify(value)
         
+        # Debug: Print fuzzified inputs
+        print(f"Fuzzified inputs:")
+        for var, memberships in fuzzified.items():
+            print(f"  {var}: {memberships}")
+        
         # Step 2: Rule evaluation
         rule_outputs = {"low": [], "moderate": [], "high": []}
+        active_rules = []
         
-        for rule in self.rules:
+        for i, rule in enumerate(self.rules):
             strength, conclusion = rule.evaluate(fuzzified)
             if strength > 0:
                 risk_level = conclusion["risk"]
                 rule_outputs[risk_level].append(strength)
+                active_rules.append((i, strength, conclusion))
+        
+        # Debug: Print active rules
+        print(f"Active rules: {len(active_rules)}")
+        for rule_idx, strength, conclusion in active_rules:
+            print(f"  Rule {rule_idx}: strength={strength:.3f}, conclusion={conclusion}")
         
         # Step 3: Aggregation (take maximum for each output set)
         aggregated = {}
